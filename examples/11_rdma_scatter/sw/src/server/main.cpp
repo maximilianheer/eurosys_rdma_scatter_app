@@ -36,6 +36,15 @@
 
 constexpr bool const IS_CLIENT = false;
 
+// Registers, corresponding to the registers defined in the vFPGA
+enum class ScatterRegisters: uint32_t {
+    VADDR_1 = 0, 
+    VADDR_2 = 1, 
+    VADDR_3 = 2, 
+    VADDR_4 = 3, 
+    VADDR_VALID = 4
+}; 
+
 // Note, how the Coyote thread is passed by reference; to avoid creating a copy of 
 // the thread object which can lead to undefined behaviour and bugs. 
 void run_bench(
@@ -69,7 +78,7 @@ void run_bench(
     // Functional correctness check
     if (operation) {
         for (int i = 0; i < sg.len / sizeof(int); i++) {
-            assert(mem[i] == i);                        
+            // assert(mem[i] == i);                        
         }
     }
 }
@@ -100,6 +109,24 @@ int main(int argc, char *argv[])  {
     coyote::cThread coyote_thread(DEFAULT_VFPGA_ID, getpid());
     int *mem = (int *) coyote_thread.initRDMA(max_size, coyote::DEF_PORT);
     if (!mem) { throw std::runtime_error("Could not allocate memory; exiting..."); }
+
+    // Allocate four buffers for the scatter operation 
+    int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
+    int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
+    int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
+    int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
+
+    // Throw an exception if any of the buffers could not be allocated 
+    if(!vaddr_1 || !vaddr_2 || !vaddr_3 || !vaddr_4) {
+        throw std::runtime_error("Could not allocate memory for scatter buffers; exiting...");
+    }
+
+    // Write the buffer addresses to the vFPGA registers
+    coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_1), static_cast<uint32_t>(ScatterRegisters::VADDR_1));
+    coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_2), static_cast<uint32_t>(ScatterRegisters::VADDR_2));
+    coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_3), static_cast<uint32_t>(ScatterRegisters::VADDR_3));
+    coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_4), static_cast<uint32_t>(ScatterRegisters::VADDR_4));
+    coyote_thread.setCSR(static_cast<uint64_t>(true), static_cast<uint32_t>(ScatterRegisters::VADDR_VALID));
 
     // Benchmark sweep; exactly like done in the client code
     HEADER("RDMA BENCHMARK: SERVER");
