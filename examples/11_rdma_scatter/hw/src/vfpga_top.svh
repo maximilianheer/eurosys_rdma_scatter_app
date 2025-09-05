@@ -141,7 +141,7 @@ end
 `AXISR_ASSIGN(axis_rrsp_recv[0], axis_host_send[1])
 
 // Tie off unused interfaces
-always_comb axi_ctrl.tie_off_s();
+// always_comb axi_ctrl.tie_off_s();
 always_comb notify.tie_off_m();
 always_comb cq_rd.tie_off_s();
 always_comb cq_wr.tie_off_s();
