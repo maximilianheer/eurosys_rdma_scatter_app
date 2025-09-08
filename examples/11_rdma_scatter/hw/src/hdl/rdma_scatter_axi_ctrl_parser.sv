@@ -118,8 +118,8 @@ always_ff @(posedge aclk) begin
     ctrl_reg <= 0;
   end
   else begin
-    // Control
-    ctrl_reg[BENCH_VADDR_1_REG] <= 0;
+    // Control -> Forcing this to zero is a problem as we want to keep the vaddr values for scatter operation 
+    // ctrl_reg[BENCH_VADDR_1_REG] <= 0;
 
     if(ctrl_reg_wren) begin
       case (axi_awaddr[ADDR_LSB+:ADDR_MSB])
