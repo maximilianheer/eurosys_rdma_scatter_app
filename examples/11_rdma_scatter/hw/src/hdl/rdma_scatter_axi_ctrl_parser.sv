@@ -118,8 +118,7 @@ always_ff @(posedge aclk) begin
     ctrl_reg <= 0;
   end
   else begin
-    // Control
-    ctrl_reg[BENCH_VADDR_1_REG] <= 0;
+    // Control -> Forcing this to zero is a problem as we want to keep the vaddr values for scatter operation
 
     if(ctrl_reg_wren) begin
       case (axi_awaddr[ADDR_LSB+:ADDR_MSB])
@@ -158,6 +157,23 @@ always_ff @(posedge aclk) begin
     end
   end
 end    
+
+
+/////////////////////////////////////
+//         READ PROCESS           //
+///////////////////////////////////
+assign ctrl_reg_rden = axi_arready & axi_ctrl.arvalid & ~axi_rvalid;
+
+// There is no actual read process as all registers are write-only, but we need to assign the values to avoid logic trimming 
+always_ff @(posedge aclk) begin 
+  if(aresetn == 1'b0) begin 
+    axi_rdata <= 0;
+  end else begin 
+    if(ctrl_reg_rden) begin 
+      axi_rdata <= 0;
+    end 
+  end 
+end 
 
 /////////////////////////////////////
 //       OUTPUT ASSIGNMENT        //

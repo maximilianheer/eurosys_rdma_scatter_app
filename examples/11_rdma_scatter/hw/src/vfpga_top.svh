@@ -57,7 +57,7 @@ logic[2:0] pkt_cnt;
 
 // IP-core for getting the vaddr for scatter operation 
 rdma_scatter_axi_ctrl_parser inst_axi_ctrl_parser (
-    .aclk(ack), 
+    .aclk(aclk), 
     .aresetn(aresetn), 
     .axi_ctrl(axi_ctrl), 
     .bench_vaddr_1(vaddr_arr[0]),
@@ -102,13 +102,11 @@ always_comb begin
 
     // Pass on all data-fields except for the vaddr
     sq_wr.data.opcode   = rq_wr.data.opcode;  // Opcode (READ/WRITE)
-    sq_wr.data.strm     = rq_wr.data.strm;      // Stream (HOST/FPGA)
     sq_wr.data.mode     = rq_wr.data.mode;      // Mode (e.g. for atomic operations)
     sq_wr.data.rdma     = rq_wr.data.rdma;      // RDMA (1 for RDMA operations, 0 for local operations)
     sq_wr.data.remote   = rq_wr.data.remote;  // Remote (1 for remote operations, 0 for local operations) 
     sq_wr.data.vfid     = rq_wr.data.vfid;      // VFID (for SR-IOV, not used in this example)
     sq_wr.data.pid      = rq_wr.data.pid;       // PID (process ID, for multi-process support)  
-    sq_wr.data.dest     = rq_wr.data.dest;      // Destination (0 for FPGA, 1 for HOST)   
     sq_wr.data.last     = rq_wr.data.last;      // Last (indicates last beat of a packet)
     sq_wr.data.len      = rq_wr.data.len;       // Length (in bytes)
     sq_wr.data.actv     = rq_wr.data.actv;      // Active (indicates if the request is valid)
@@ -118,8 +116,7 @@ always_comb begin
 
     // Write
     sq_wr.valid = rq_wr.valid;
-    rq_wr.ready = sq_wr.ready;
-    sq_wr.data = rq_wr.data;            // Data field holds information such as remote, virtual address, buffer length etc.
+    rq_wr.ready = sq_wr.ready;        // Data field holds information such as remote, virtual address, buffer length etc.
     sq_wr.data.strm = STRM_HOST;        // For RDMA, by definition data is always on the host
     sq_wr.data.dest = is_opcode_rd_resp(rq_wr.data.opcode) ? 0 : 1; 
 end 
@@ -141,7 +138,7 @@ end
 `AXISR_ASSIGN(axis_rrsp_recv[0], axis_host_send[1])
 
 // Tie off unused interfaces
-always_comb axi_ctrl.tie_off_s();
+// always_comb axi_ctrl.tie_off_s();
 always_comb notify.tie_off_m();
 always_comb cq_rd.tie_off_s();
 always_comb cq_wr.tie_off_s();
@@ -170,5 +167,17 @@ ila_perf_rdma inst_ila_perf_rdma (
     .probe14(sq_wr.data),                   // 128
     .probe15(sq_rd.valid),                  // 1
     .probe16(sq_rd.ready),                  // 1
-    .probe17(sq_rd.data)                    // 128
+    .probe17(sq_rd.data),                   // 128
+
+    .probe18(vaddr_arr[0]),                // 64
+    .probe19(vaddr_arr[1]),                // 64
+    .probe20(vaddr_arr[2]),                // 64
+    .probe21(vaddr_arr[3]),                // 64
+    .probe22(bench_vaddr_valid),           // 1
+    .probe23(pkt_cnt),                     // 3
+
+    .probe24(axi_ctrl.wvalid), 
+    .probe25(axi_ctrl.awvalid), 
+    .probe26(axi_ctrl.awaddr),              // 64
+    .probe27(axi_ctrl.wdata)                // 64   
 );
