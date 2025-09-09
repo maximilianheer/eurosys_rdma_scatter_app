@@ -174,5 +174,10 @@ ila_perf_rdma inst_ila_perf_rdma (
     .probe20(vaddr_arr[2]),                // 64
     .probe21(vaddr_arr[3]),                // 64
     .probe22(bench_vaddr_valid),           // 1
-    .probe23(pkt_cnt)                      // 3
+    .probe23(pkt_cnt),                     // 3
+
+    .probe24(axi_ctrl.wvalid), 
+    .probe25(axi_ctrl.awvalid), 
+    .probe26(axi_ctrl.awaddr),              // 64
+    .probe27(axi_ctrl.wdata)                // 64   
 );
