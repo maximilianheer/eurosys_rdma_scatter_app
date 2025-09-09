@@ -26,7 +26,7 @@
 
 # CMake configuration
 cmake_minimum_required(VERSION 3.5)
-project(example_09_perf_rdma)
+project(example_11_rdma_scatter)
 
 set(CYT_DIR ${CMAKE_SOURCE_DIR}/../../../)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CYT_DIR}/cmake)
@@ -45,8 +45,14 @@ if(INSTANCE STREQUAL "client")
     include_directories("${CMAKE_SOURCE_DIR}/src/include")
 endif()
 
+set(EN_GPU 1)
+
 # Create build targets and link against required libraries
 set(EXEC test)
 add_executable(${EXEC} ${TARGET_DIR}/main.cpp)
 target_link_libraries(${EXEC} PUBLIC Coyote)
 target_link_directories(${EXEC} PUBLIC /usr/local/lib)
+
+# Target GPU architecture - gfx90 corresponds to MI210 - change as needed
+set(AMD_GPU "gfx90a" CACHE STRING "Target GPU platform")
+set_property(TARGET ${EXEC} PROPERTY HIP_ARCHITECTURES ${AMD_GPU})

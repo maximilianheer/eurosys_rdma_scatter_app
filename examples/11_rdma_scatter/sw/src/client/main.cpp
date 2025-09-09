@@ -27,6 +27,9 @@
 #include <iostream>
 #include <cstdlib>
 
+// AMD GPU management & run-time libraries
+#include <hip/hip_runtime.h>
+
 // External library for easier parsing of CLI arguments by the executable
 #include <boost/program_options.hpp>
 
@@ -128,6 +131,9 @@ int main(int argc, char *argv[])  {
     int *mem = (int *) coyote_thread.initRDMA(max_size, coyote::DEF_PORT, server_ip.c_str());
     if (!mem) { throw std::runtime_error("Could not allocate memory; exiting..."); }
 
+    // GPU memory will be allocated on the GPU set using hipSetDevice(...)
+    // if (hipSetDevice(DEFAULT_GPU_ID)) { throw std::runtime_error("Couldn't select GPU!"); }
+    
     // Allocate four buffers for the scatter operation 
     int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
     int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 

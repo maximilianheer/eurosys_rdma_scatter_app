@@ -27,6 +27,9 @@
 #include <iostream>
 #include <cstdlib>
 
+// AMD GPU management & run-time libraries
+#include <hip/hip_runtime.h>
+
 // External library for easier parsing of CLI arguments by the executable
 #include <boost/program_options.hpp>
 
@@ -110,11 +113,13 @@ int main(int argc, char *argv[])  {
     int *mem = (int *) coyote_thread.initRDMA(max_size, coyote::DEF_PORT);
     if (!mem) { throw std::runtime_error("Could not allocate memory; exiting..."); }
 
+    if (hipSetDevice(DEFAULT_GPU_ID)) { throw std::runtime_error("Couldn't select GPU!"); }
+
     // Allocate four buffers for the scatter operation 
-    int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
-    int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
-    int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
-    int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
+    int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, DEFAULT_GPU_ID}); 
+    int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, DEFAULT_GPU_ID}); 
+    int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, DEFAULT_GPU_ID});
+    int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, DEFAULT_GPU_ID});
 
     // Print all the new buffer addresses
     std::cout << "Scatter buffer addresses:" << std::endl;
