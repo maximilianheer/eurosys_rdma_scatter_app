@@ -116,6 +116,13 @@ int main(int argc, char *argv[])  {
     int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
     int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
 
+    // Print all the new buffer addresses
+    std::cout << "Scatter buffer addresses:" << std::endl;
+    std::cout << "Buffer 1: " << std::hex << reinterpret_cast<uint64_t>(vaddr_1) << std::endl;
+    std::cout << "Buffer 2: " << std::hex << reinterpret_cast<uint64_t>(vaddr_2) << std::endl;
+    std::cout << "Buffer 3: " << std::hex << reinterpret_cast<uint64_t>(vaddr_3) << std::endl;
+    std::cout << "Buffer 4: " << std::hex << reinterpret_cast<uint64_t>(vaddr_4) << std::endl << std::dec;
+
     // Throw an exception if any of the buffers could not be allocated 
     if(!vaddr_1 || !vaddr_2 || !vaddr_3 || !vaddr_4) {
         throw std::runtime_error("Could not allocate memory for scatter buffers; exiting...");
