@@ -39,6 +39,8 @@
 
 constexpr bool const IS_CLIENT = false;
 
+#define DEFAULT_GPU_ID 0
+
 // Registers, corresponding to the registers defined in the vFPGA
 enum class ScatterRegisters: uint32_t {
     VADDR_1 = 0, 
