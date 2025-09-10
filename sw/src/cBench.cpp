@@ -40,6 +40,7 @@ double cBench::getAvg() {
     for (const double &t : measured_times) {
         avg_time += t;
     }
+
     return avg_time / (double) measured_times.size(); 
 }
 

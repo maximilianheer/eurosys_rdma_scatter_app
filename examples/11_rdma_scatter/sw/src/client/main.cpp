@@ -28,7 +28,7 @@
 #include <cstdlib>
 
 // AMD GPU management & run-time libraries
-#include <hip/hip_runtime.h>
+// #include <hip/hip_runtime.h>
 
 // External library for easier parsing of CLI arguments by the executable
 #include <boost/program_options.hpp>
@@ -83,7 +83,7 @@ double run_bench(
     };
 
     // Execute benchmark
-    coyote::cBench bench(n_runs, 0);
+    coyote::cBench bench(n_runs, 10);
     bench.execute(bench_fn, prep_fn);
 
     // Functional correctness check
@@ -159,6 +159,8 @@ int main(int argc, char *argv[])  {
     coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_4), static_cast<uint32_t>(ScatterRegisters::VADDR_4));
     coyote_thread.setCSR(static_cast<uint64_t>(true), static_cast<uint32_t>(ScatterRegisters::VADDR_VALID));
 
+    // sleep(20);
+
     // Benchmark sweep of latency and throughput
     HEADER("RDMA BENCHMARK: CLIENT");
     unsigned int curr_size = min_size;
@@ -167,9 +169,9 @@ int main(int argc, char *argv[])  {
         
         coyote::rdmaSg sg = { .len = curr_size };
     
-        double throughput_time = run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
-        double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
-        std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; ";
+        // double throughput_time = run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
+        // double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
+        // std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; ";
         
         double latency_time = run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs, operation);
         std::cout << "Average latency: " << std::setw(8) << latency_time / 1e3 << " us" << std::endl;

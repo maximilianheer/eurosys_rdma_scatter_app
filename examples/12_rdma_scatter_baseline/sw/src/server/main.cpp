@@ -38,6 +38,7 @@
 #include "constants.hpp"
 
 constexpr bool const IS_CLIENT = false;
+const int NUM_GPUS = 4;
 
 #define DEFAULT_GPU_ID 0
 
@@ -54,7 +55,7 @@ enum class ScatterRegisters: uint32_t {
 // the thread object which can lead to undefined behaviour and bugs. 
 void run_bench(
     coyote::cThread &coyote_thread, coyote::rdmaSg &sg, 
-    int *mem, uint transfers, uint n_runs, bool operation
+    int *mem, int* dest_buffers[], uint transfers, uint n_runs, bool operation
 ) {
     // When writing, the server asserts the written payload is correct (which the client sets)
     // When reading, the client asserts the read payload is correct (which the server sets)
@@ -62,14 +63,73 @@ void run_bench(
         mem[i] = operation ? 0 : i;        
     }
 
+    hipStream_t streams[NUM_GPUS];
+    hipEvent_t events[NUM_GPUS];
+
+    for(int i = 0; i < NUM_GPUS; i++) {
+                if (hipSetDevice(i)) { throw std::runtime_error("Couldn't select GPU!"); } 
+                if (hipStreamCreate(&streams[i]) != hipSuccess) { throw std::runtime_error("Couldn't create stream!"); }
+                if (hipEventCreate(&events[i]) != hipSuccess) { throw std::runtime_error("Couldn't create event!"); }
+                printf("Created stream and event for GPU %d\n", i);
+            }
+
     for (int i = 0; i < n_runs; i++) {
         // Clear previous completion flags and sync with client
         coyote_thread.clearCompleted();
         coyote_thread.connSync(IS_CLIENT);
 
+
         // For writes, wait until client has written the targer number of messages; then write them back
         if (operation) {
             while (coyote_thread.checkCompleted(coyote::CoyoteOper::LOCAL_WRITE) != transfers) {}
+
+            // Create Streams and Events for checking 
+            /* hipStream_t streams[NUM_GPUS];
+            hipEvent_t events[NUM_GPUS]; */ 
+
+            // Copy received payload from host memory to the four GPU buffers and record every copy as event 
+            for(int i = 0; i < sg.len / 4096; i++) {
+                // printf("Copying chunk %d/%d to GPU %d\n", i+1, sg.len/4096, i%4);
+                if (hipSetDevice(i%4)) { throw std::runtime_error("Couldn't select GPU!"); }
+                hipMemcpyAsync(dest_buffers[i % 4], &mem[i * 4096], 4096, hipMemcpyHostToDevice);
+                // hipMemcpy(dest_buffers[i % 4], &mem[i * 4096], 4096, hipMemcpyHostToDevice);
+                // hipEventRecord(events[i % 4], streams[i % 4]);
+            }
+
+        
+            // hipMemcpy(dest_buffers[0], &mem[0], sg.len, hipMemcpyHostToDevice);
+
+            // Check events non-blocking until all copies are done 
+            /* bool all_done = false; 
+            bool done[NUM_GPUS] = {false, false, false, false};
+            while(!all_done) {
+                all_done = true; 
+                for(int i = 0; i < NUM_GPUS; i++) {
+                    if(!done[i]) { 
+                        if (hipSetDevice(i)) { throw std::runtime_error("Couldn't select GPU!"); }
+                        hipError_t event_status = hipEventQuery(events[i]);
+                        if (event_status == hipErrorNotReady) {
+                            all_done = false; 
+                            printf("Copy to GPU %d not done yet!\n", i);
+                        } else if (event_status == hipSuccess) {
+                            done[i] = true;
+                            printf("Copy to GPU %d done!\n", i);
+                        } else {
+                            throw std::runtime_error("Error while querying the hipEvent: " + std::to_string(event_status));
+                        }
+                    }
+                }
+                printf("Continue Checking...\n");
+            } */ 
+
+            // Sync mem copy for all the GPUs 
+            for(int i = 0; i < NUM_GPUS; i++) {
+                if (hipSetDevice(i)) { throw std::runtime_error("Couldn't select GPU!"); }
+                if (hipStreamSynchronize(streams[i]) != hipSuccess) { throw std::runtime_error("Couldn't synchronize stream!"); }
+                // printf("Synchronized stream for GPU %d\n", i);
+            }
+
+            
 
             for (int i = 0; i < transfers; i++) {
                 coyote_thread.invoke(coyote::CoyoteOper::REMOTE_RDMA_WRITE, sg);
@@ -79,6 +139,13 @@ void run_bench(
 
         }
     }
+
+    printf("Checking done!\n");
+            for(int i = 0; i < NUM_GPUS; i++) {
+                hipStreamDestroy(streams[i]); 
+                hipEventDestroy(events[i]); 
+                printf("Destroyed stream and event for GPU %d\n", i);
+            } 
     
     // Functional correctness check
     if (operation) {
@@ -142,11 +209,16 @@ int main(int argc, char *argv[])  {
     }
 
     // Write the buffer addresses to the vFPGA registers
-    coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_1), static_cast<uint32_t>(ScatterRegisters::VADDR_1));
-    coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_2), static_cast<uint32_t>(ScatterRegisters::VADDR_2));
-    coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_3), static_cast<uint32_t>(ScatterRegisters::VADDR_3));
-    coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_4), static_cast<uint32_t>(ScatterRegisters::VADDR_4));
-    coyote_thread.setCSR(static_cast<uint64_t>(true), static_cast<uint32_t>(ScatterRegisters::VADDR_VALID));
+    /* coyote_thread.setCSR(reinterpret_cast<uint64_t>(mem), static_cast<uint32_t>(ScatterRegisters::VADDR_1));
+    coyote_thread.setCSR(reinterpret_cast<uint64_t>(mem), static_cast<uint32_t>(ScatterRegisters::VADDR_2));
+    coyote_thread.setCSR(reinterpret_cast<uint64_t>(mem), static_cast<uint32_t>(ScatterRegisters::VADDR_3));
+    coyote_thread.setCSR(reinterpret_cast<uint64_t>(mem), static_cast<uint32_t>(ScatterRegisters::VADDR_4));
+    coyote_thread.setCSR(static_cast<uint64_t>(true), static_cast<uint32_t>(ScatterRegisters::VADDR_VALID)); */ 
+
+    // Pack the destination buffers into an array for passing them to the benchmark function 
+    int* destination_buffers [4] = {vaddr_1, vaddr_2, vaddr_3, vaddr_4};
+
+    if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); }
 
     // Benchmark sweep; exactly like done in the client code
     HEADER("RDMA BENCHMARK: SERVER");
@@ -154,11 +226,20 @@ int main(int argc, char *argv[])  {
     while(curr_size <= max_size) {
         coyote::rdmaSg sg = { .len = curr_size };
         // run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
-        run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs, operation);
+        run_bench(coyote_thread, sg, mem, destination_buffers, N_LATENCY_REPS, n_runs+10, operation);
         curr_size *= 2;
     }
 
     // Final sync and exit
+    if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); }
+    hipFree(vaddr_1);
+    if (hipSetDevice(1)) { throw std::runtime_error("Couldn't select GPU!"); }
+    hipFree(vaddr_2);
+    if (hipSetDevice(2)) { throw std::runtime_error("Couldn't select GPU!"); }
+    hipFree(vaddr_3);
+    if (hipSetDevice(3)) { throw std::runtime_error("Couldn't select GPU!"); }
+    hipFree(vaddr_4);
+
     coyote_thread.connSync(IS_CLIENT);
     return EXIT_SUCCESS;
 }

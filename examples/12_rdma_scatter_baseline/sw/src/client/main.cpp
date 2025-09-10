@@ -28,18 +28,17 @@
 #include <cstdlib>
 
 // AMD GPU management & run-time libraries
-#include <hip/hip_runtime.h>
+// #include <hip/hip_runtime.h>
 
 // External library for easier parsing of CLI arguments by the executable
 #include <boost/program_options.hpp>
 
 // Coyote-specific includes
+#include "cBench.hpp"
 #include "cThread.hpp"
 #include "constants.hpp"
 
-constexpr bool const IS_CLIENT = false;
-
-#define DEFAULT_GPU_ID 0
+constexpr bool const IS_CLIENT = true;
 
 // Registers, corresponding to the registers defined in the vFPGA
 enum class ScatterRegisters: uint32_t {
@@ -52,49 +51,62 @@ enum class ScatterRegisters: uint32_t {
 
 // Note, how the Coyote thread is passed by reference; to avoid creating a copy of 
 // the thread object which can lead to undefined behaviour and bugs. 
-void run_bench(
+double run_bench(
     coyote::cThread &coyote_thread, coyote::rdmaSg &sg, 
     int *mem, uint transfers, uint n_runs, bool operation
 ) {
     // When writing, the server asserts the written payload is correct (which the client sets)
     // When reading, the client asserts the read payload is correct (which the server sets)
     for (int i = 0; i < sg.len / sizeof(int); i++) {
-        mem[i] = operation ? 0 : i;        
+        mem[i] = operation ? i : 0;         
     }
-
-    for (int i = 0; i < n_runs; i++) {
-        // Clear previous completion flags and sync with client
+    
+    // Before every benchmark, clear previous completion flags and sync with server
+    // Sync is in a way equivalent to MPI_Barrier()
+    auto prep_fn = [&]() {
         coyote_thread.clearCompleted();
         coyote_thread.connSync(IS_CLIENT);
+    };
+    
+    /* Benchmark function; as eplained in the README
+     * For RDMA_WRITEs, the client writes multiple times to the server and then the server writes the same content back
+     * For RDMA READs, the client reads from the server multiple times
+     * In boths cases, that means there will be n_transfers completed writes to local memory (LOCAL_WRITE)
+     */
+    coyote::CoyoteOper coyote_operation = operation ? coyote::CoyoteOper::REMOTE_RDMA_WRITE : coyote::CoyoteOper::REMOTE_RDMA_READ;
+    auto bench_fn = [&]() {        
+        for (int i = 0; i < transfers; i++) {
+            coyote_thread.invoke(coyote_operation, sg);
+        }
 
-        // For writes, wait until client has written the targer number of messages; then write them back
-        if (operation) {
-            while (coyote_thread.checkCompleted(coyote::CoyoteOper::LOCAL_WRITE) != transfers) {}
+        while (coyote_thread.checkCompleted(coyote::CoyoteOper::LOCAL_WRITE) != transfers) {}
+    };
 
-            for (int i = 0; i < transfers; i++) {
-                coyote_thread.invoke(coyote::CoyoteOper::REMOTE_RDMA_WRITE, sg);
-            }
-        // For reads, the server is completely passive 
-        } else { 
+    // Execute benchmark
+    coyote::cBench bench(n_runs, 0);
+    bench.execute(bench_fn, prep_fn);
 
+    // Functional correctness check
+    if (!operation) {
+        for (int i = 0; i < sg.len / sizeof(int); i++) {
+            assert(mem[i] == i);
         }
     }
     
-    // Functional correctness check
-    if (operation) {
-        for (int i = 0; i < sg.len / sizeof(int); i++) {
-            // assert(mem[i] == i);                        
-        }
-    }
+    // For writes, divide by 2, since that is sent two ways (from client to server and then from server to client)
+    // Reads are one way, so no need to scale
+    return bench.getAvg() / (1. + (double) operation);
 }
 
 int main(int argc, char *argv[])  {
     // CLI arguments
     bool operation;
+    std::string server_ip;
     unsigned int min_size, max_size, n_runs;
 
     boost::program_options::options_description runtime_options("Coyote Perf RDMA Options");
     runtime_options.add_options()
+        ("ip_address,i", boost::program_options::value<std::string>(&server_ip), "Server's IP address")
         ("operation,o", boost::program_options::value<bool>(&operation)->default_value(false), "Benchmark operation: READ(0) or WRITE(1)")
         ("runs,r", boost::program_options::value<unsigned int>(&n_runs)->default_value(N_RUNS_DEFAULT), "Number of times to repeat the test")
         ("min_size,x", boost::program_options::value<unsigned int>(&min_size)->default_value(MIN_TRANSFER_SIZE_DEFAULT), "Starting (minimum) transfer size")
@@ -104,30 +116,29 @@ int main(int argc, char *argv[])  {
     boost::program_options::notify(command_line_arguments);
 
     HEADER("CLI PARAMETERS:");
+    std::cout << "Server's TCP address: " << server_ip << std::endl;
     std::cout << "Benchmark operation: " << (operation ? "WRITE" : "READ") << std::endl;
     std::cout << "Number of test runs: " << n_runs << std::endl;
     std::cout << "Starting transfer size: " << min_size << std::endl;
     std::cout << "Ending transfer size: " << max_size << std::endl << std::endl;
 
-    // Allocate Coyothe threa and set-up RDMA connections, buffer etc.
-    // initRDMA is explained in more detail in client/main.cpp
-    coyote::cThread coyote_thread(DEFAULT_VFPGA_ID, getpid());
-    int *mem = (int *) coyote_thread.initRDMA(max_size, coyote::DEF_PORT);
+    /* Coyote completely abstracts the complexity behind exchanging QPs and setting up an RDMA connection
+     * Instead, given a cThread, the target RDMA buffer size and the remote server's TCP address,
+     * One can use the function initRDMA, which will allocate the buffer and 
+     * Exchange the necessary information with the server; the server calls the equivalent function but without the IP address
+     */
+    coyote::cThread coyote_thread(DEFAULT_VFPGA_ID, getpid(), 0);
+    int *mem = (int *) coyote_thread.initRDMA(max_size, coyote::DEF_PORT, server_ip.c_str());
     if (!mem) { throw std::runtime_error("Could not allocate memory; exiting..."); }
 
-    // Allocate four buffers on four different GPUs for the scatter operation 
-    if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); } 
-    // if (hipSetDevice(1)) { throw std::runtime_error("Couldn't select GPU!"); }
-    // if (hipSetDevice(1)) { throw std::runtime_error("Couldn't select GPU!"); }
-    // if (hipSetDevice(1)) { throw std::runtime_error("Couldn't select GPU!"); }   
-
-    int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 0}); 
+    // GPU memory will be allocated on the GPU set using hipSetDevice(...)
+    // if (hipSetDevice(DEFAULT_GPU_ID)) { throw std::runtime_error("Couldn't select GPU!"); }
     
-    int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 1}); 
-    
-    int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 2});
-    
-    int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 3});
+    // Allocate four buffers for the scatter operation 
+    int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
+    int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
+    int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
+    int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
 
     // Print all the new buffer addresses
     std::cout << "Scatter buffer addresses:" << std::endl;
@@ -148,13 +159,23 @@ int main(int argc, char *argv[])  {
     coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_4), static_cast<uint32_t>(ScatterRegisters::VADDR_4));
     coyote_thread.setCSR(static_cast<uint64_t>(true), static_cast<uint32_t>(ScatterRegisters::VADDR_VALID));
 
-    // Benchmark sweep; exactly like done in the client code
-    HEADER("RDMA BENCHMARK: SERVER");
+    // sleep(20);
+
+    // Benchmark sweep of latency and throughput
+    HEADER("RDMA BENCHMARK: CLIENT");
     unsigned int curr_size = min_size;
     while(curr_size <= max_size) {
+        std::cout << "Size: " << std::setw(8) << curr_size << "; ";
+        
         coyote::rdmaSg sg = { .len = curr_size };
-        // run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
-        run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs, operation);
+    
+        // double throughput_time = run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
+        // double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
+        // std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; ";
+        
+        double latency_time = run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs, operation);
+        std::cout << "Average latency: " << std::setw(8) << latency_time / 1e3 << " us" << std::endl;
+
         curr_size *= 2;
     }
 
