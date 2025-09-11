@@ -92,6 +92,9 @@ void run_bench(
                 // printf("Copying chunk %d/%d to GPU %d\n", i+1, sg.len/4096, i%4);
                 if (hipSetDevice(i%4)) { throw std::runtime_error("Couldn't select GPU!"); }
                 hipMemcpyAsync(dest_buffers[i % 4], &mem[i * 4096], 4096, hipMemcpyHostToDevice);
+
+                // if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); }
+                // hipMemcpyAsync(dest_buffers[0], &mem[0], sg.len, hipMemcpyHostToDevice);
                 // hipMemcpy(dest_buffers[i % 4], &mem[i * 4096], 4096, hipMemcpyHostToDevice);
                 // hipEventRecord(events[i % 4], streams[i % 4]);
             }
@@ -125,7 +128,11 @@ void run_bench(
             // Sync mem copy for all the GPUs 
             for(int i = 0; i < NUM_GPUS; i++) {
                 if (hipSetDevice(i)) { throw std::runtime_error("Couldn't select GPU!"); }
-                if (hipStreamSynchronize(streams[i]) != hipSuccess) { throw std::runtime_error("Couldn't synchronize stream!"); }
+                if (hipDeviceSynchronize() != hipSuccess) { throw std::runtime_error("Couldn't synchronize stream!"); }
+
+                // if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); }
+                // if (hipDeviceSynchronize() != hipSuccess) { throw std::runtime_error("Couldn't synchronize stream!"); }
+
                 // printf("Synchronized stream for GPU %d\n", i);
             }
 

@@ -77,9 +77,11 @@ double run_bench(
     auto bench_fn = [&]() {        
         for (int i = 0; i < transfers; i++) {
             coyote_thread.invoke(coyote_operation, sg);
+            // printf("Invoked %d/%d\n", i+1, transfers);
         }
 
         while (coyote_thread.checkCompleted(coyote::CoyoteOper::LOCAL_WRITE) != transfers) {}
+        // printf("Completed %d transfers\n", transfers);
     };
 
     // Execute benchmark

@@ -69,10 +69,13 @@ void run_bench(
 
         // For writes, wait until client has written the targer number of messages; then write them back
         if (operation) {
+            // printf("Run %d: Waiting for %u writes from client...\n", i, transfers);
             while (coyote_thread.checkCompleted(coyote::CoyoteOper::LOCAL_WRITE) != transfers) {}
+            // printf("Run %d: Received %u writes from client; writing them back...\n", i, transfers);
 
             for (int i = 0; i < transfers; i++) {
                 coyote_thread.invoke(coyote::CoyoteOper::REMOTE_RDMA_WRITE, sg);
+                // printf("Run %d: Invoked write %d/%d\n", i, i+1, transfers);
             }
         // For reads, the server is completely passive 
         } else { 
@@ -123,10 +126,13 @@ int main(int argc, char *argv[])  {
 
     int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 0}); 
     
+    // if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); }
     int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 1}); 
     
+    // if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); }
     int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 2});
     
+    // if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); }
     int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 3});
 
     // Print all the new buffer addresses
@@ -154,7 +160,7 @@ int main(int argc, char *argv[])  {
     while(curr_size <= max_size) {
         coyote::rdmaSg sg = { .len = curr_size };
         // run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
-        run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs, operation);
+        run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs + 10, operation);
         curr_size *= 2;
     }
 

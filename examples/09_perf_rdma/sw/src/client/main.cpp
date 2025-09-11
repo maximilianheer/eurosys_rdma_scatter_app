@@ -71,7 +71,7 @@ double run_bench(
     };
 
     // Execute benchmark
-    coyote::cBench bench(n_runs, 0);
+    coyote::cBench bench(n_runs, 10);
     bench.execute(bench_fn, prep_fn);
 
     // Functional correctness check
@@ -127,9 +127,9 @@ int main(int argc, char *argv[])  {
         
         coyote::rdmaSg sg = { .len = curr_size };
     
-        double throughput_time = run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
-        double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
-        std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; ";
+        // double throughput_time = run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
+        // double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
+        // std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; ";
         
         double latency_time = run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs, operation);
         std::cout << "Average latency: " << std::setw(8) << latency_time / 1e3 << " us" << std::endl;
