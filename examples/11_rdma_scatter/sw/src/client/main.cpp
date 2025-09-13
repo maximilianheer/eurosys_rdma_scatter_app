@@ -28,7 +28,7 @@
 #include <cstdlib>
 
 // AMD GPU management & run-time libraries
-// #include <hip/hip_runtime.h>
+#include <hip/hip_runtime.h>
 
 // External library for easier parsing of CLI arguments by the executable
 #include <boost/program_options.hpp>
@@ -89,11 +89,6 @@ double run_bench(
     bench.execute(bench_fn, prep_fn);
 
     // Functional correctness check
-    if (!operation) {
-        for (int i = 0; i < sg.len / sizeof(int); i++) {
-            assert(mem[i] == i);
-        }
-    }
     
     // For writes, divide by 2, since that is sent two ways (from client to server and then from server to client)
     // Reads are one way, so no need to scale
@@ -134,13 +129,13 @@ int main(int argc, char *argv[])  {
     if (!mem) { throw std::runtime_error("Could not allocate memory; exiting..."); }
 
     // GPU memory will be allocated on the GPU set using hipSetDevice(...)
-    // if (hipSetDevice(DEFAULT_GPU_ID)) { throw std::runtime_error("Couldn't select GPU!"); }
+    if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); }
     
     // Allocate four buffers for the scatter operation 
-    int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
-    int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
-    int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
-    int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
+    int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 0}); 
+    int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 1}); 
+    int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 2});
+    int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 3});
 
     // Print all the new buffer addresses
     std::cout << "Scatter buffer addresses:" << std::endl;

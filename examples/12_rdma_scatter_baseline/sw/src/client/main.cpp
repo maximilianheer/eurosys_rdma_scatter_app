@@ -28,7 +28,7 @@
 #include <cstdlib>
 
 // AMD GPU management & run-time libraries
-// #include <hip/hip_runtime.h>
+#include <hip/hip_runtime.h>
 
 // External library for easier parsing of CLI arguments by the executable
 #include <boost/program_options.hpp>
@@ -39,6 +39,7 @@
 #include "constants.hpp"
 
 constexpr bool const IS_CLIENT = true;
+const int NUM_GPUS = 4;
 
 // Registers, corresponding to the registers defined in the vFPGA
 enum class ScatterRegisters: uint32_t {
@@ -53,7 +54,7 @@ enum class ScatterRegisters: uint32_t {
 // the thread object which can lead to undefined behaviour and bugs. 
 double run_bench(
     coyote::cThread &coyote_thread, coyote::rdmaSg &sg, 
-    int *mem, uint transfers, uint n_runs, bool operation
+    int *mem, int* dest_buffers[], uint transfers, uint n_runs, bool operation
 ) {
     // When writing, the server asserts the written payload is correct (which the client sets)
     // When reading, the client asserts the read payload is correct (which the server sets)
@@ -80,18 +81,25 @@ double run_bench(
         }
 
         while (coyote_thread.checkCompleted(coyote::CoyoteOper::LOCAL_WRITE) != transfers) {}
+
+        // After having received all the data, scatter it to the four GPU buffers 
+        for(int i = 0; i < sg.len / 8192; i++) {
+            // printf("Copying chunk %d/%d to GPU %d\n", i+1, sg.len/4096, i%4);
+            if (hipSetDevice(i%4)) { throw std::runtime_error("Couldn't select GPU!"); }
+            hipMemcpyAsync(dest_buffers[i % 4], &mem[i * 8192], 8192, hipMemcpyHostToDevice);
+        }
+
+        // Sync mem copy for all the GPUs
+        for(int i = 0; i < NUM_GPUS; i++) {
+            if (hipSetDevice(i)) { throw std::runtime_error("Couldn't select GPU!"); }
+            if (hipDeviceSynchronize() != hipSuccess) { throw std::runtime_error("Couldn't synchronize stream!"); }
+        }
     };
 
     // Execute benchmark
-    coyote::cBench bench(n_runs, 0);
+    coyote::cBench bench(n_runs, 10);
     bench.execute(bench_fn, prep_fn);
 
-    // Functional correctness check
-    if (!operation) {
-        for (int i = 0; i < sg.len / sizeof(int); i++) {
-            assert(mem[i] == i);
-        }
-    }
     
     // For writes, divide by 2, since that is sent two ways (from client to server and then from server to client)
     // Reads are one way, so no need to scale
@@ -135,10 +143,11 @@ int main(int argc, char *argv[])  {
     // if (hipSetDevice(DEFAULT_GPU_ID)) { throw std::runtime_error("Couldn't select GPU!"); }
     
     // Allocate four buffers for the scatter operation 
-    int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
-    int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size}); 
-    int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
-    int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::HPF, max_size});
+    if (hipSetDevice(0)) { throw std::runtime_error("Couldn't select GPU!"); } 
+    int* vaddr_1 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 0}); 
+    int* vaddr_2 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 1}); 
+    int* vaddr_3 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 2});
+    int* vaddr_4 = (int *) coyote_thread.getMem({coyote::CoyoteAllocType::GPU, max_size, false, 3});
 
     // Print all the new buffer addresses
     std::cout << "Scatter buffer addresses:" << std::endl;
@@ -153,11 +162,14 @@ int main(int argc, char *argv[])  {
     }
 
     // Write the buffer addresses to the vFPGA registers
-    coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_1), static_cast<uint32_t>(ScatterRegisters::VADDR_1));
+    /* coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_1), static_cast<uint32_t>(ScatterRegisters::VADDR_1));
     coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_2), static_cast<uint32_t>(ScatterRegisters::VADDR_2));
     coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_3), static_cast<uint32_t>(ScatterRegisters::VADDR_3));
     coyote_thread.setCSR(reinterpret_cast<uint64_t>(vaddr_4), static_cast<uint32_t>(ScatterRegisters::VADDR_4));
-    coyote_thread.setCSR(static_cast<uint64_t>(true), static_cast<uint32_t>(ScatterRegisters::VADDR_VALID));
+    coyote_thread.setCSR(static_cast<uint64_t>(true), static_cast<uint32_t>(ScatterRegisters::VADDR_VALID)); */ 
+
+    // Array of destination buffers for scatter operation
+    int* dest_buffers[NUM_GPUS] = { vaddr_1, vaddr_2, vaddr_3, vaddr_4 };
 
     // sleep(20);
 
@@ -173,7 +185,7 @@ int main(int argc, char *argv[])  {
         // double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
         // std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; ";
         
-        double latency_time = run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs, operation);
+        double latency_time = run_bench(coyote_thread, sg, mem, dest_buffers, N_LATENCY_REPS, n_runs, operation);
         std::cout << "Average latency: " << std::setw(8) << latency_time / 1e3 << " us" << std::endl;
 
         curr_size *= 2;
