@@ -100,6 +100,7 @@ int main(int argc, char *argv[])  {
     bool operation;
     std::string server_ip;
     unsigned int min_size, max_size, n_runs;
+    bool throughput;
 
     boost::program_options::options_description runtime_options("Coyote Perf RDMA Options");
     runtime_options.add_options()
@@ -107,7 +108,8 @@ int main(int argc, char *argv[])  {
         ("operation,o", boost::program_options::value<bool>(&operation)->default_value(false), "Benchmark operation: READ(0) or WRITE(1)")
         ("runs,r", boost::program_options::value<unsigned int>(&n_runs)->default_value(N_RUNS_DEFAULT), "Number of times to repeat the test")
         ("min_size,x", boost::program_options::value<unsigned int>(&min_size)->default_value(MIN_TRANSFER_SIZE_DEFAULT), "Starting (minimum) transfer size")
-        ("max_size,X", boost::program_options::value<unsigned int>(&max_size)->default_value(MAX_TRANSFER_SIZE_DEFAULT), "Ending (maximum) transfer size");
+        ("max_size,X", boost::program_options::value<unsigned int>(&max_size)->default_value(MAX_TRANSFER_SIZE_DEFAULT), "Ending (maximum) transfer size")
+        ("throughput,t", boost::program_options::bool_switch(&throughput)->default_value(false), "Whether to benchmark throughput (true) or latency (false); by default, latency is benchmarked");
     boost::program_options::variables_map command_line_arguments;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, runtime_options), command_line_arguments);
     boost::program_options::notify(command_line_arguments);
@@ -118,6 +120,8 @@ int main(int argc, char *argv[])  {
     std::cout << "Number of test runs: " << n_runs << std::endl;
     std::cout << "Starting transfer size: " << min_size << std::endl;
     std::cout << "Ending transfer size: " << max_size << std::endl << std::endl;
+    std::cout << "Benchmarking " << (throughput ? "throughput" : "latency") << std::endl << std::endl;
+    
 
     /* Coyote completely abstracts the complexity behind exchanging QPs and setting up an RDMA connection
      * Instead, given a cThread, the target RDMA buffer size and the remote server's TCP address,
@@ -166,12 +170,14 @@ int main(int argc, char *argv[])  {
         
         coyote::rdmaSg sg = { .len = curr_size };
     
-        // double throughput_time = run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
-        // double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
-        // std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; ";
-        
-        double latency_time = run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs, operation);
-        std::cout << "Average latency: " << std::setw(8) << latency_time / 1e3 << " us" << std::endl;
+        if(throughput) {
+            double throughput_time = run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
+            double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
+            std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; \n";
+        } else {
+            double latency_time = run_bench(coyote_thread, sg, mem, N_LATENCY_REPS, n_runs, operation);
+            std::cout << "Average latency: " << std::setw(8) << latency_time / 1e3 << " us" << std::endl;
+        }
 
         curr_size *= 2;
     }

@@ -54,8 +54,10 @@ enum class ScatterRegisters: uint32_t {
 // the thread object which can lead to undefined behaviour and bugs. 
 double run_bench(
     coyote::cThread &coyote_thread, coyote::rdmaSg &sg, 
-    int *mem, int* dest_buffers[], uint transfers, uint n_runs, bool operation
+    uint8_t *mem, int* dest_buffers[], uint transfers, uint n_runs, bool operation
 ) {
+
+    printf("Running benchmark with transfer size %d bytes, repeated %d times\n", sg.len, transfers);
     // When writing, the server asserts the written payload is correct (which the client sets)
     // When reading, the client asserts the read payload is correct (which the server sets)
     for (int i = 0; i < sg.len / sizeof(int); i++) {
@@ -82,12 +84,17 @@ double run_bench(
 
         while (coyote_thread.checkCompleted(coyote::CoyoteOper::LOCAL_WRITE) != transfers) {}
 
+        // printf("Received all data from server, starting scatter to GPUs...\n");
+
         // After having received all the data, scatter it to the four GPU buffers 
         for(int i = 0; i < sg.len / 8192; i++) {
             // printf("Copying chunk %d/%d to GPU %d\n", i+1, sg.len/4096, i%4);
-            if (hipSetDevice(i%4)) { throw std::runtime_error("Couldn't select GPU!"); }
-            hipMemcpyAsync(dest_buffers[i % 4], &mem[i * 8192], 8192, hipMemcpyHostToDevice);
+            // printf("Copying chunk %d/%d to GPU %d\n", i+1, sg.len/8192, i%NUM_GPUS);
+            if (hipSetDevice(i%NUM_GPUS)) { throw std::runtime_error("Couldn't select GPU!"); }
+            if (hipMemcpyAsync(dest_buffers[i % NUM_GPUS], &mem[i * 8192], 8192, hipMemcpyHostToDevice) != hipSuccess) { throw std::runtime_error("Couldn't copy memory to GPU!"); }
         }
+
+        //printf("Issued all async copies to GPUs\n");
 
         // Sync mem copy for all the GPUs
         for(int i = 0; i < NUM_GPUS; i++) {
@@ -111,6 +118,7 @@ int main(int argc, char *argv[])  {
     bool operation;
     std::string server_ip;
     unsigned int min_size, max_size, n_runs;
+    bool throughput;
 
     boost::program_options::options_description runtime_options("Coyote Perf RDMA Options");
     runtime_options.add_options()
@@ -118,7 +126,8 @@ int main(int argc, char *argv[])  {
         ("operation,o", boost::program_options::value<bool>(&operation)->default_value(false), "Benchmark operation: READ(0) or WRITE(1)")
         ("runs,r", boost::program_options::value<unsigned int>(&n_runs)->default_value(N_RUNS_DEFAULT), "Number of times to repeat the test")
         ("min_size,x", boost::program_options::value<unsigned int>(&min_size)->default_value(MIN_TRANSFER_SIZE_DEFAULT), "Starting (minimum) transfer size")
-        ("max_size,X", boost::program_options::value<unsigned int>(&max_size)->default_value(MAX_TRANSFER_SIZE_DEFAULT), "Ending (maximum) transfer size");
+        ("max_size,X", boost::program_options::value<unsigned int>(&max_size)->default_value(MAX_TRANSFER_SIZE_DEFAULT), "Ending (maximum) transfer size")
+        ("throughput,t", boost::program_options::bool_switch(&throughput)->default_value(false), "Whether to benchmark throughput (true) or latency (false); by default, latency is benchmarked");
     boost::program_options::variables_map command_line_arguments;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, runtime_options), command_line_arguments);
     boost::program_options::notify(command_line_arguments);
@@ -129,6 +138,7 @@ int main(int argc, char *argv[])  {
     std::cout << "Number of test runs: " << n_runs << std::endl;
     std::cout << "Starting transfer size: " << min_size << std::endl;
     std::cout << "Ending transfer size: " << max_size << std::endl << std::endl;
+    std::cout << "Benchmarking " << (throughput ? "throughput" : "latency") << std::endl << std::endl;
 
     /* Coyote completely abstracts the complexity behind exchanging QPs and setting up an RDMA connection
      * Instead, given a cThread, the target RDMA buffer size and the remote server's TCP address,
@@ -136,7 +146,7 @@ int main(int argc, char *argv[])  {
      * Exchange the necessary information with the server; the server calls the equivalent function but without the IP address
      */
     coyote::cThread coyote_thread(DEFAULT_VFPGA_ID, getpid(), 0);
-    int *mem = (int *) coyote_thread.initRDMA(max_size, coyote::DEF_PORT, server_ip.c_str());
+    uint8_t *mem = (uint8_t *) coyote_thread.initRDMA(max_size, coyote::DEF_PORT, server_ip.c_str());
     if (!mem) { throw std::runtime_error("Could not allocate memory; exiting..."); }
 
     // GPU memory will be allocated on the GPU set using hipSetDevice(...)
@@ -181,12 +191,15 @@ int main(int argc, char *argv[])  {
         
         coyote::rdmaSg sg = { .len = curr_size };
     
-        // double throughput_time = run_bench(coyote_thread, sg, mem, N_THROUGHPUT_REPS, n_runs, operation);
-        // double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
-        // std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; ";
+        if(throughput) {
+            double throughput_time = run_bench(coyote_thread, sg, mem, dest_buffers, N_THROUGHPUT_REPS, n_runs, operation);
+            double throughput = ((double) N_THROUGHPUT_REPS * (double) curr_size) / (1024.0 * 1024.0 * throughput_time * 1e-9);
+            std::cout << "Average throughput: " << std::setw(8) << throughput << " MB/s; ";
+        } else {
         
-        double latency_time = run_bench(coyote_thread, sg, mem, dest_buffers, N_LATENCY_REPS, n_runs, operation);
-        std::cout << "Average latency: " << std::setw(8) << latency_time / 1e3 << " us" << std::endl;
+            double latency_time = run_bench(coyote_thread, sg, mem, dest_buffers, N_LATENCY_REPS, n_runs, operation);
+            std::cout << "Average latency: " << std::setw(8) << latency_time / 1e3 << " us" << std::endl;
+        } 
 
         curr_size *= 2;
     }

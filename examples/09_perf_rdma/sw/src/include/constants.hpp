@@ -35,7 +35,7 @@
 #define DEFAULT_VFPGA_ID 0
 
 // Run-time parameters; users can change these from the CLI
-#define N_RUNS_DEFAULT              10
+#define N_RUNS_DEFAULT              30
 #define MIN_TRANSFER_SIZE_DEFAULT   64
 #define MAX_TRANSFER_SIZE_DEFAULT   (1 * 1024 * 1024)
 
